@@ -1,18 +1,14 @@
-# Local OS metadata
+# Local environment
 .DS_Store
 Thumbs.db
 
-# Nose
-.noseids
-
 # Vagrant
-.vagrant
+.vagrant/
 
 # Test reports
 unittests.xml
 
-# databases
-*.db
+# database files
 db/*
 !db/.keep
 
@@ -63,6 +59,7 @@ htmlcov/
 .coverage.*
 .cache
 nosetests.xml
+.noseids
 coverage.xml
 *,cover
 .hypothesis/
@@ -101,7 +98,6 @@ celerybeat-schedule
 .env
 
 # virtualenv
-.venv
 venv/
 ENV/
 

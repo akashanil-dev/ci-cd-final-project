@@ -1,157 +1,132 @@
 """
-Account API Service Test Suite
+Counter API Service Test Suite
 
 Test cases can be run with the following:
   nosetests -v --with-spec --spec-color
   coverage report -m
 """
-import os
-import logging
 from unittest import TestCase
-from tests.factories import AccountFactory
 from service.common import status  # HTTP Status Codes
-from service.models import db, Account, init_db
-from service.routes import app
-
-DATABASE_URI = os.getenv(
-    "DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"
-)
-
-BASE_URL = "/accounts"
+from service.routes import app, reset_counters
 
 
 ######################################################################
 #  T E S T   C A S E S
 ######################################################################
-class TestAccountService(TestCase):
-    """Account Service Tests"""
+class CounterTest(TestCase):
+    """ REST API Server Tests """
 
     @classmethod
     def setUpClass(cls):
-        """Run once before all tests"""
-        app.config["TESTING"] = True
-        app.config["DEBUG"] = False
-        app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
-        app.logger.setLevel(logging.CRITICAL)
-        init_db(app)
+        """ This runs once before the entire test suite """
+        app.testing = True
 
     @classmethod
     def tearDownClass(cls):
-        """Runs once before test suite"""
+        """ This runs once after the entire test suite """
+        pass
 
     def setUp(self):
-        """Runs before each test"""
-        db.session.query(Account).delete()  # clean up the last tests
-        db.session.commit()
-
-        self.client = app.test_client()
+        """ This runs before each test """
+        reset_counters()
+        self.app = app.test_client()
 
     def tearDown(self):
-        """Runs once after each test case"""
-        db.session.remove()
+        """ This runs after each test """
+        pass
 
-    ######################################################################
-    #  H E L P E R   M E T H O D S
-    ######################################################################
-
-    def _create_accounts(self, count):
-        """Factory method to create accounts in bulk"""
-        accounts = []
-        for _ in range(count):
-            account = AccountFactory()
-            response = self.client.post(BASE_URL, json=account.serialize())
-            self.assertEqual(
-                response.status_code,
-                status.HTTP_201_CREATED,
-                "Could not create test Account",
-            )
-            new_account = response.get_json()
-            account.id = new_account["id"]
-            accounts.append(account)
-        return accounts
-
-    ######################################################################
-    #  A C C O U N T   T E S T   C A S E S
-    ######################################################################
+######################################################################
+#  T E S T   C A S E S
+######################################################################
 
     def test_index(self):
-        """It should get 200_OK from the Home Page"""
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        """ It should call the index call """
+        resp = self.app.get("/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_health(self):
-        """It should be healthy"""
-        resp = self.client.get("/health")
-        self.assertEqual(resp.status_code, 200)
+        """ It should be healthy """
+        resp = self.app.get("/health")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_create_counters(self):
+        """ It should Create a counter """
+        name = "foo"
+        resp = self.app.post(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         data = resp.get_json()
-        self.assertEqual(data["status"], "OK")
+        self.assertEqual(data["name"], name)
+        self.assertEqual(data["counter"], 0)
 
-    def test_create_account(self):
-        """It should Create a new Account"""
-        account = AccountFactory()
-        response = self.client.post(
-            BASE_URL,
-            json=account.serialize(),
-            content_type="application/json"
-        )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    def test_create_duplicate_counter(self):
+        """ It should not Create a duplicate counter """
+        name = "foo"
+        resp = self.app.post(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        data = resp.get_json()
+        self.assertEqual(data["name"], name)
+        self.assertEqual(data["counter"], 0)
+        resp = self.app.post(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_409_CONFLICT)
 
-        # Make sure location header is set
-        location = response.headers.get("Location", None)
-        self.assertIsNotNone(location)
-
-        # Check the data is correct
-        new_account = response.get_json()
-        self.assertEqual(new_account["name"], account.name)
-        self.assertEqual(new_account["email"], account.email)
-        self.assertEqual(new_account["address"], account.address)
-        self.assertEqual(new_account["phone_number"], account.phone_number)
-        self.assertEqual(new_account["date_joined"], str(account.date_joined))
-
-    def test_bad_request(self):
-        """It should not Create an Account when sending the wrong data"""
-        response = self.client.post(BASE_URL, json={"name": "not enough data"})
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_unsupported_media_type(self):
-        """It should not Create an Account when sending the wrong media type"""
-        account = AccountFactory()
-        response = self.client.post(
-            BASE_URL,
-            json=account.serialize(),
-            content_type="test/html"
-        )
-        self.assertEqual(response.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
-
-    # ADD YOUR TEST CASES HERE ...
-        def test_get_account(self):
-        """It should Read a single Account"""
-        account = self._create_accounts(1)[0]
-        resp = self.client.get(
-            f"{BASE_URL}/{account.id}", content_type="application/json"
-        )
+    def test_list_counters(self):
+        """ It should List counters """
+        resp = self.app.get("/counters")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         data = resp.get_json()
-        self.assertEqual(data["name"], account.name)
+        self.assertEqual(len(data), 0)
+        # create a counter and name sure it appears in the list
+        self.app.post("/counters/foo")
+        resp = self.app.get("/counters")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        data = resp.get_json()
+        self.assertEqual(len(data), 1)
 
-    ######################################################################
-    # READ AN ACCOUNT
-    ######################################################################
-    @app.route("/accounts/<int:account_id>", methods=["GET"])
-    def get_accounts(account_id):
-        """
-        Reads an Account
-        This endpoint will read an Account based the account_id that is requested
-        """
-        app.logger.info("Request to read an Account with id: %s", account_id)
+    def test_read_counters(self):
+        """ It should Read a counter """
+        name = "foo"
+        self.app.post(f"/counters/{name}")
+        resp = self.app.get(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        data = resp.get_json()
+        self.assertEqual(data["name"], name)
+        self.assertEqual(data["counter"], 0)
 
-        account = Account.find(account_id)
-        if not account:
-            abort(status.HTTP_404_NOT_FOUND, f"Account with id [{account_id}] could not be found.")
+    def test_update_counters(self):
+        """ It should Update a counter """
+        name = "foo"
+        resp = self.app.post(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        resp = self.app.get(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        data = resp.get_json()
+        print(data)
+        self.assertEqual(data["name"], name)
+        self.assertEqual(data["counter"], 0)
+        # now update it
+        resp = self.app.put(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        data = resp.get_json()
+        self.assertEqual(data["name"], name)
+        self.assertEqual(data["counter"], 1)
 
-        return account.serialize(), status.HTTP_200_OK
+    def test_update_missing_counters(self):
+        """ It should not Update a missing counter """
+        name = "foo"
+        resp = self.app.put(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_get_account_not_found(self):
-        """It should not Read an Account that is not found"""
-        resp = self.client.get(f"{BASE_URL}/0")
+    def test_delete_counters(self):
+        """ It should Delete a counter """
+        name = "foo"
+        # Create a counter
+        resp = self.app.post(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        # Delete it twice should return the same
+        resp = self.app.delete(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        resp = self.app.delete(f"/counters/{name}")
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        # Gte it to make sure it's really gone
+        resp = self.app.get(f"/counters/{name}")
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
